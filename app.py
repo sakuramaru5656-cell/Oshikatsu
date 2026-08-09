@@ -14,144 +14,143 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@700;800&display=swap');
     html, body, [class*="css"] { font-family: 'M PLUS Rounded 1c', sans-serif; background-color: #FFFDF0; }
     .stApp { background: #FFFDF0; }
-    .fc { background: white !important; border-radius: 20px !important; border: 4px solid #3B82F6 !important; padding: 10px; box-shadow: 0 8px 20px rgba(0,0,0,0.05); }
+    
+    /* カレンダーデザイン */
+    .fc { background: white !important; border-radius: 20px !important; border: 4px solid #3B82F6 !important; padding: 10px; }
     .fc-event { border-radius: 8px !important; border: none !important; padding: 4px 6px !important; font-weight: 800 !important; cursor: pointer; }
+    
+    /* ポップなカード */
     .pop-card { background: white; border-radius: 20px; padding: 20px; margin-top: 15px; border: 4px solid #3B82F6; box-shadow: 6px 6px 0px #BFDBFE; }
     .badge { display: inline-block; padding: 4px 12px; border-radius: 50px; font-size: 11px; font-weight: bold; color: white; margin-right: 5px; }
+    
+    /* フィルター部分のスタイル */
+    .filter-container { background: #FFFFFF; border-radius: 15px; padding: 20px; border: 2px solid #3B82F6; margin-bottom: 20px; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 定数と設定 ---
+# --- 定数定義 ---
 GENRES = {
-    "VTuber": {"emoji": "🌈", "words": ["ホロライブ", "さくらみこ", "にじさんじ"], "color": "#F472B6"},
-    "ポケモン": {"emoji": "🐾", "words": ["ポケモンセンター", "ポケモン", "ポケカ"], "color": "#3B82F6"},
-    "ジャニーズ": {"emoji": "🎤", "words": ["Snow Man", "なにわ男子", "King & Prince", "Hey! Say! JUMP"], "color": "#FB923C"},
-    "ジャンプ": {"emoji": "👒", "words": ["ワンピース", "ONE PIECE", "ナルト", "NARUTO"], "color": "#F87171"},
-    "あんスタ": {"emoji": "✨", "words": ["あんさんぶるスターズ", "あんスタ"], "color": "#A78BFA"},
-    "テーマパーク": {"emoji": "🎡", "words": ["富士急", "ピューロランド", "USJ", "ディズニー"], "color": "#10B981"},
-    "その他": {"emoji": "🎁", "words": ["コラボカフェ", "アニメイベント"], "color": "#94A3B8"}
+    "VTuber": {"emoji": "🌈", "words": ["ホロライブ", "にじさんじ", "ぶいすぽ", "さくらみこ", "宝鐘マリン", "星街すいせい"], "color": "#F472B6"},
+    "ポケモン": {"emoji": "🐾", "words": ["ポケモンセンター", "ポケモン", "ポケカ", "ピカチュウ"], "color": "#3B82F6"},
+    "アイドル": {"emoji": "🎤", "words": ["Snow Man", "King & Prince", "なにわ男子", "SixTONES", "Hey! Say! JUMP", "timelesz", "ライブ", "ツアー"], "color": "#FB923C"},
+    "あんスタ": {"emoji": "✨", "words": ["あんスタ", "あんさんぶるスターズ"], "color": "#A78BFA"},
+    "ジャンプ": {"emoji": "👒", "words": ["ワンピース", "ONE PIECE", "ナルト", "NARUTO", "ジャンプショップ"], "color": "#F87171"},
+    "テーマパーク": {"emoji": "🎡", "words": ["富士急ハイランド", "サンリオピューロランド", "USJ", "ディズニー", "ナンジャタウン"], "color": "#10B981"},
+    "その他": {"emoji": "🎁", "words": ["コラボ", "イベント", "ポップアップ"], "color": "#94A3B8"}
 }
 
 TIME_OPTIONS = ["30分以内", "1時間以内", "1時間半以内", "2時間半以内", "それ以上"]
 
 def get_access_info(loc):
     guides = {
-        "30分以内": "🚃 JR宇都宮線 (約25分) / 🚗 車 (約40分)",
-        "1時間以内": "🚄 新幹線なすの (約15分) / 🚃 JR快速 (約45分)",
-        "1時間半以内": "🚄 新幹線 (約40分) / 🚃 上野東京ライン (約80分)",
-        "2時間半以内": "🚃 湘南新宿ライン (約130分) / 🚄 新幹線+JR",
+        "30分以内": "🚃 宇都宮線 (25分) / 🚗 車 (40分)",
+        "1時間以内": "🚄 新幹線 (15分) / 🚃 快速 (45分)",
+        "1時間半以内": "🚄 新幹線 (40分) / 🚃 在来線 (80分)",
+        "2時間半以内": "🚃 湘南新宿ライン (130分) / 🚄 新幹線+JR",
         "それ以上": "🚄 新幹線 / ✈️ 飛行機 / 🚌 高速バス"
     }
     return guides.get(loc, "交通機関を確認してください")
 
-# --- 高度な日付抽出 ---
-def extract_dates_advanced(text):
-    curr_year = datetime.now().year
+# --- 高度な日付抽出エンジン ---
+def parse_dates_v3(text):
+    year = datetime.now().year
     sep = r'[〜~ー\-\s－]+'
-    # 形式: 8/1〜8/30
-    m = re.search(r'(\d{1,2})[./月](\d{1,2}).*?{sep}(\d{1,2})[./月](\d{1,2})'.format(sep=sep), text)
+    # 期間形式
+    m = re.search(r'(\d{1,2})[./月](\d{1,2})[日]?{sep}(\d{1,2})[./月](\d{1,2})[日]?'.format(sep=sep), text)
     if m:
         try:
-            s = datetime(curr_year, int(m.group(1)), int(m.group(2)))
-            e = datetime(curr_year, int(m.group(3)), int(m.group(4)))
-            if e < s: e = datetime(curr_year + 1, int(m.group(3)), int(m.group(4)))
-            return s, e
+            start = datetime(year, int(m.group(1)), int(m.group(2)))
+            end = datetime(year, int(m.group(3)), int(m.group(4)))
+            if end < start: end = datetime(year + 1, int(m.group(3)), int(m.group(4)))
+            return start, end
         except: pass
-    # 単発: 8/1
-    m = re.search(r'(\d{1,2})[./月](\d{1,2})', text)
+    # 単発
+    m = re.search(r'(\d{1,2})[./月](\d{1,2})[日]?', text)
     if m:
         try:
-            d = datetime(curr_year, int(m.group(1)), int(m.group(2)))
-            return d, d
+            dt = datetime(year, int(m.group(1)), int(m.group(2)))
+            return dt, dt
         except: pass
     return None, None
 
 @st.cache_data(ttl=1800)
-def fetch_data(custom_kw=None):
+def fetch_more_events(selected_genres, custom_kw):
     all_events = []
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
     
-    # 検索キーワード作成
-    search_list = []
-    for g, info in GENRES.items(): search_list.extend(info["words"][:2])
-    if custom_kw: search_list.extend([x.strip() for x in custom_kw.split(",")])
+    # 検索キーワードを広げる
+    keywords = []
+    for g in selected_genres:
+        keywords.extend(GENRES[g]["words"][:4])
+    if custom_kw:
+        keywords.extend([k.strip() for k in custom_kw.split(",")])
 
-    for kw in list(set(search_list)):
+    for kw in list(set(keywords))[:20]: # 検索上限を拡大
         url = f"https://collabo-cafe.com/?s={kw}"
         try:
             res = requests.get(url, headers=headers, timeout=10)
             soup = BeautifulSoup(res.text, 'html.parser')
-            for art in soup.select('article')[:5]:
-                title = art.select_one('.entry-title').get_text().strip()
-                # 抜粋文からも日付を探す
-                excerpt = art.select_one('.entry-content, .entry-summary')
-                excerpt_text = excerpt.get_text().strip() if excerpt else ""
+            articles = soup.find_all('article')
+            for art in articles[:8]: # 取得件数をアップ
+                title_el = art.find('h2') or art.select_one('.entry-title')
+                if not title_el: continue
+                title = title_el.get_text().strip()
                 link = art.find('a')['href']
                 
-                # 日付解析
-                start_dt, end_dt = extract_dates_advanced(title + excerpt_text)
-                
-                if start_dt:
-                    loc = "1時間半以内"
-                    if any(x in title for x in ["宇都宮", "ベルモール"]): loc = "30分以内"
-                    elif any(x in title for x in ["大宮", "さいたま"]): loc = "1時間以内"
-                    elif any(x in title for x in ["横浜", "幕張", "千葉", "富士急"]): loc = "2時間半以内"
-                    elif any(x in title for x in ["大阪", "名古屋", "USJ"]): loc = "それ以上"
+                start, end = parse_dates_v3(title)
+                loc = "1時間半以内"
+                if any(x in title for x in ["宇都宮", "ベルモール"]): loc = "30分以内"
+                elif any(x in title for x in ["大宮", "さいたま", "スーパーアリーナ"]): loc = "1時間以内"
+                elif any(x in title for x in ["横浜", "幕張", "千葉", "Kアリーナ", "ぴあアリーナ", "富士急"]): loc = "2時間半以内"
+                elif any(x in title for x in ["大阪", "名古屋", "USJ", "福岡"]): loc = "それ以上"
 
-                    emoji = "🎁"
+                if start:
+                    emoji = "🔍"
                     color = "#94A3B8"
-                    for g, info in GENRES.items():
+                    for g_name, info in GENRES.items():
                         if any(w in title or w in kw for w in info["words"]):
                             emoji, color = info["emoji"], info["color"]
                             break
 
                     all_events.append({
-                        "id": f"{kw}-{title[:5]}", "title": f"{emoji} {kw}",
-                        "full_title": title, "start": start_dt, "end": end_dt,
-                        "genre": g, "time": loc, "url": link, "color": color
+                        "id": f"{kw}-{title[:10]}", "emoji_title": f"{emoji} {kw}",
+                        "full_title": title, "start": start, "end": end,
+                        "genre": g_name if 'g_name' in locals() else "その他",
+                        "time": loc, "url": link, "color": color
                     })
         except: pass
-    
-    # 【レスキュー機能】データが空の場合の予備データ（2026年8月想定）
-    if not all_events:
-        today = datetime.now()
-        all_events.append({
-            "id": "rescue-1", "title": "🌈 ホロライブ", "full_title": "ホロライブ・サマー 2026 開催中！",
-            "start": today, "end": today + timedelta(days=20),
-            "genre": "VTuber", "time": "1時間半以内", "url": "https://hololive.hololivepro.com/", "color": "#F472B6"
-        })
-        all_events.append({
-            "id": "rescue-2", "title": "🐾 ポケモン", "full_title": "ポケモンセンター夏祭り 2026",
-            "start": today - timedelta(days=2), "end": today + timedelta(days=10),
-            "genre": "ポケモン", "time": "1時間以内", "url": "https://www.pokemon.co.jp/", "color": "#3B82F6"
-        })
-        
     return all_events
 
-# --- UI構築 ---
+# --- メイン画面 ---
 st.title("✨ 推しイベ")
-st.write("栃木県小山駅発 🚃 冒険スケジュール (2026版)")
+st.write("栃木県小山駅発 🚃 スケジュール図鑑")
 
-with st.sidebar:
-    st.header("🔍 カスタム検索")
-    custom_kw = st.text_input("好きなワード (例: アイナナ, 呪術)", "")
-    st.header("⏳ フィルター")
-    sel_gen = st.multiselect("ジャンル", list(GENRES.keys()), default=list(GENRES.keys()))
-    sel_time = st.multiselect("距離", TIME_OPTIONS, default=["30分以内", "1時間以内", "1時間半以内"])
+# --- 検索パネル（カレンダーの上に配置） ---
+st.markdown('<div class="filter-container">', unsafe_allow_html=True)
+c1, c2 = st.columns(2)
+with c1:
+    sel_gen = st.multiselect("🌈 ジャンル選択", list(GENRES.keys()), default=["VTuber", "ポケモン", "アイドル", "あんスタ"])
+with c2:
+    sel_time = st.multiselect("⏳ 小山からの時間", TIME_OPTIONS, default=["30分以内", "1時間以内", "1時間半以内", "2時間半以内"])
+
+custom_input = st.text_input("🔍 自由検索ワード (例: 呪術廻戦, アイナナ)", help="カンマ区切りで入力")
+st.markdown('</div>', unsafe_allow_html=True)
 
 # データ取得
-data = fetch_data(custom_kw)
-filtered = [e for e in data if e['genre'] in sel_gen and e['time'] in sel_time]
+with st.spinner("最新の推し情報をスキャン中..."):
+    data = fetch_more_events(sel_gen, custom_input)
+    filtered = [e for e in data if e['time'] in sel_time]
 
-# カレンダー表示
+# --- カレンダー表示 ---
+st.subheader("📅 推しカレンダー")
 cal_events = []
 for e in filtered:
     cal_events.append({
-        "id": e['id'], "title": e['title'], 
+        "id": e['id'], "title": e['emoji_title'], 
         "start": e['start'].strftime("%Y-%m-%d"), 
         "end": (e['end'] + timedelta(days=1)).strftime("%Y-%m-%d"),
         "backgroundColor": e['color'], "borderColor": "white",
-        "extendedProps": {"full_title": e['full_title'], "url": e['url'], "time": e['time']}
+        "extendedProps": {"full_title": e['full_title'], "url": e['url'], "time": e['time'], "gen": e['genre']}
     })
 
 state = calendar(events=cal_events, options={"initialView": "dayGridMonth", "locale": "ja", "height": "auto"})
@@ -163,19 +162,26 @@ if state.get("eventClick"):
         <div class="pop-card">
             <h3 style='color:#1E40AF; margin-top:0;'>✨ イベント詳細</h3>
             <b>{p['full_title']}</b><br><br>
+            <span class="badge" style="background:{GENRES.get(p['gen'], {'color': '#94A3B8'})['color']}">{p['gen']}</span>
             <span class="badge" style="background:#3B82F6">📍 小山から{p['time']}</span><br><br>
             <small>🚃 経路目安: {get_access_info(p['time'])}</small><br><br>
-            <a href="{p['url']}" target="_blank"><button style="width:100%; background:#3B82F6; color:white; border:none; padding:12px; border-radius:10px; cursor:pointer;">公式サイトへ GO!</button></a>
+            <a href="{p['url']}" target="_blank">
+                <button style="width:100%; background:#3B82F6; color:white; border:none; padding:12px; border-radius:10px; cursor:pointer; font-weight:bold;">公式サイトへ GO!</button>
+            </a>
         </div>
     """, unsafe_allow_html=True)
 
-# リスト表示
+# 週間・全件リスト
 st.subheader("📋 直近のリスト")
-for e in sorted(filtered, key=lambda x: x['start'])[:10]:
-    st.markdown(f"""
-        <div style="background:white; border-radius:15px; padding:15px; margin-bottom:10px; border-left:8px solid {e['color']}; box-shadow:2px 2px 5px rgba(0,0,0,0.05);">
-            <small>{e['start'].strftime('%m/%d')} 〜 {e['end'].strftime('%m/%d')}</small><br>
-            <b>{e['full_title']}</b><br>
-            <small style="color:#3B82F6;">🚃 {get_access_info(e['time'])}</small>
-        </div>
-    """, unsafe_allow_html=True)
+if not filtered:
+    st.info("条件に合うイベントが現在見つかりませんでした。自由検索ワードに推しの名前を入れてみてください！")
+else:
+    for e in sorted(filtered, key=lambda x: x['start'])[:15]:
+        date_str = f"{e['start'].strftime('%m/%d')} 〜 {e['end'].strftime('%m/%d')}"
+        st.markdown(f"""
+            <div style="background:white; border-radius:15px; padding:15px; margin-bottom:10px; border-left:8px solid {e['color']}; box-shadow:2px 2px 5px rgba(0,0,0,0.05);">
+                <small>{date_str} | 小山から{e['time']}</small><br>
+                <b>{e['full_title']}</b><br>
+                <small style="color:#3B82F6;">🚃 {get_access_info(e['time'])}</small>
+            </div>
+        """, unsafe_allow_html=True)
