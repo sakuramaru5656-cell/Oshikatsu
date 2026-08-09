@@ -11,29 +11,20 @@ st.set_page_config(page_title="HoloPoke Access", page_icon="🌸", layout="cente
 
 st.markdown("""
     <style>
-    /* 全体の背景とフォント */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; background-color: #F8FAFC; }
     
     /* カードのデザイン */
     .event-card {
-        background: white;
-        border-radius: 16px;
-        padding: 20px;
-        margin-bottom: 16px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-        border: 1px solid #F1F5F9;
+        background: white; border-radius: 16px; padding: 20px;
+        margin-bottom: 16px; border: 1px solid #F1F5F9;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
     }
     
-    /* バッジ（時間・カテゴリー） */
+    /* バッジ */
     .badge {
-        display: inline-block;
-        padding: 4px 12px;
-        border-radius: 9999px;
-        font-size: 12px;
-        font-weight: 600;
-        margin-right: 8px;
-        margin-bottom: 8px;
+        display: inline-block; padding: 4px 12px; border-radius: 9999px;
+        font-size: 12px; font-weight: 600; margin-right: 8px; margin-bottom: 8px;
     }
     .time-30 { background-color: #DCFCE7; color: #166534; }
     .time-60 { background-color: #DBEAFE; color: #1E40AF; }
@@ -41,27 +32,12 @@ st.markdown("""
     .time-150 { background-color: #FFEDD5; color: #9A3412; }
     .time-far { background-color: #FEE2E2; color: #991B1B; }
     
-    /* タイトルとリンク */
     .event-title {
-        font-size: 18px;
-        font-weight: 600;
-        color: #1E293B;
-        text-decoration: none;
-        margin-top: 8px;
-        display: block;
+        font-size: 18px; font-weight: 600; color: #1E293B;
+        text-decoration: none; margin-top: 8px; display: block;
     }
     .event-title:hover { color: #3B82F6; }
-    
-    /* サブ情報 */
     .info-text { color: #64748B; font-size: 14px; margin-top: 4px; }
-    
-    /* Streamlit標準要素のカスタマイズ */
-    .stTabs [data-baseweb="tab-list"] { background-color: transparent; gap: 8px; }
-    .stTabs [data-baseweb="tab"] {
-        background-color: white; border-radius: 8px; padding: 10px 20px;
-        border: 1px solid #E2E8F0;
-    }
-    .stTabs [aria-selected="true"] { background-color: #3B82F6 !important; color: white !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -74,7 +50,26 @@ CATEGORIES = {
     "その他": ["コラボカフェ", "アニメ展示"]
 }
 
-# --- 解析ロジック ---
+# --- 高度な日付抽出関数 ---
+def extract_dates(text):
+    """タイトルや抜粋文から日付(開始・終了)を探す"""
+    year = datetime.now().year
+    # 期間形式: 8/10〜9/1, 8.10-9.1, 8月10日〜
+    range_match = re.search(r'(\d{1,2})[./月](\d{1,2}).*?[〜~ー\-](\d{1,2})[./月](\d{1,2})', text)
+    if range_match:
+        m1, d1, m2, d2 = map(int, range_match.groups())
+        return datetime(year, m1, d1), datetime(year, m2, d2)
+    
+    # 単発形式: 8/10
+    single_match = re.search(r'(\d{1,2})[./月](\d{1,2})', text)
+    if single_match:
+        m, d = map(int, single_match.groups())
+        dt = datetime(year, m, d)
+        return dt, dt
+    
+    return None, None
+
+# --- データ取得ロジック ---
 @st.cache_data(ttl=3600)
 def fetch_events(selected_cats, custom_kw):
     search_keywords = []
@@ -89,8 +84,9 @@ def fetch_events(selected_cats, custom_kw):
         try:
             res = requests.get(url, headers=headers, timeout=10)
             soup = BeautifulSoup(res.text, 'html.parser')
-            for art in soup.select('article')[:6]:
+            for art in soup.select('article')[:8]:
                 title = art.select_one('.entry-title').get_text().strip()
+                excerpt = art.select_one('.entry-content').get_text().strip() if art.select_one('.entry-content') else ""
                 link = art.find('a')['href']
                 
                 # エリア判定
@@ -109,17 +105,15 @@ def fetch_events(selected_cats, custom_kw):
                 }
                 css_class, label, way = access_map.get(loc_label)
 
-                # 日付抽出
-                start_dt = datetime.now()
-                end_dt = start_dt + timedelta(days=1)
-                match = re.search(r'(\d+)月(\d+)日', title)
-                if match:
-                    try: start_dt = datetime(2024, int(match.group(1)), int(match.group(2)))
-                    except: pass
-                    end_dt = start_dt + timedelta(days=1)
+                # 日付抽出（タイトルと抜粋の両方から探す）
+                start_dt, end_dt = extract_dates(title + excerpt)
+                has_date = start_dt is not None
 
                 all_events.append({
-                    "title": title, "start": start_dt.strftime("%Y-%m-%d"), "end": end_dt.strftime("%Y-%m-%d"),
+                    "title": title,
+                    "start": start_dt.strftime("%Y-%m-%d") if has_date else None,
+                    "end": end_dt.strftime("%Y-%m-%d") if has_date else None,
+                    "has_date": has_date,
                     "css": css_class, "label": label, "way": way, "url": link, "kw": kw
                 })
         except: pass
@@ -127,7 +121,7 @@ def fetch_events(selected_cats, custom_kw):
 
 # --- メイン画面 ---
 st.title("🌸 HoloPoke Access")
-st.markdown(f"<p style='color: #64748B;'>小山駅から推しのイベントまでの距離を可視化</p>", unsafe_allow_html=True)
+st.markdown(f"<p style='color: #64748B;'>小山駅から推しのイベントへ。リンクは新しいタブで開きます。</p>", unsafe_allow_html=True)
 
 with st.sidebar:
     st.subheader("絞り込み")
@@ -138,26 +132,26 @@ with st.sidebar:
 data = fetch_events(selected_cats, custom_kw)
 filtered_data = [e for e in data if e['label'] in selected_times]
 
-tab1, tab2, tab3 = st.tabs(["📅 カレンダー", "📋 直近の週間予定", "🔍 全リスト"])
+tab1, tab2, tab3 = st.tabs(["📅 カレンダー", "📋 直近の週間予定", "🔍 全リスト(日付未定含む)"])
 
 with tab1:
-    calendar_options = {
-        "initialView": "dayGridMonth",
-        "headerToolbar": {"left": "prev,next", "center": "title", "right": ""},
-        "locale": "ja"
-    }
-    # カレンダー用の色変換
+    # 日付があるものだけ表示
     cal_events = []
-    for e in filtered_data:
+    for e in [x for x in filtered_data if x['has_date']]:
         color = "#22C55E" if "30分" in e['label'] else "#3B82F6" if "1時間" in e['label'] else "#EAB308" if "1時間半" in e['label'] else "#EF4444"
         cal_events.append({"title": e['title'], "start": e['start'], "end": e['end'], "color": color, "url": e['url']})
-    calendar(events=cal_events, options=calendar_options)
+    
+    if not cal_events:
+        st.info("カレンダーに表示できる日付確定イベントがありません。")
+    else:
+        calendar(events=cal_events, options={"initialView": "dayGridMonth", "locale": "ja"})
+        st.caption("※カレンダー内のリンクはシステムの制限で同じタブで開く場合があります。リスト形式の使用をおすすめします。")
 
 with tab2:
     today = datetime.now().date()
-    week_events = [e for e in filtered_data if today <= datetime.strptime(e['start'], "%Y-%m-%d").date() <= today + timedelta(days=7)]
+    week_events = [e for e in filtered_data if e['has_date'] and today <= datetime.strptime(e['start'], "%Y-%m-%d").date() <= today + timedelta(days=7)]
     if not week_events:
-        st.write("今週の予定はありません")
+        st.write("今後7日間の予定はありません")
     else:
         for e in sorted(week_events, key=lambda x: x['start']):
             st.markdown(f"""
@@ -170,11 +164,12 @@ with tab2:
             """, unsafe_allow_html=True)
 
 with tab3:
-    for e in sorted(filtered_data, key=lambda x: x['start']):
+    for e in sorted(filtered_data, key=lambda x: (not x['has_date'], x['start'] or "")):
+        date_display = e['start'] if e['has_date'] else "日付未定（詳細確認）"
         st.markdown(f"""
         <div class="event-card">
             <span class="badge {e['css']}">{e['label']}</span>
             <a href="{e['url']}" target="_blank" class="event-title">{e['title']}</a>
-            <div class="info-text">📅 {e['start']}</div>
+            <div class="info-text">📅 {date_display}</div>
         </div>
         """, unsafe_allow_html=True)
