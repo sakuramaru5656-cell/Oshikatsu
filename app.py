@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from streamlit_calendar import calendar
 import re
 
-# --- ページ設定とポップなデザインCSS ---
+# --- ページ設定とポップなデザイン ---
 st.set_page_config(page_title="推しイベ", page_icon="✨", layout="centered")
 
 st.markdown("""
@@ -15,11 +15,11 @@ st.markdown("""
     
     html, body, [class*="css"] {
         font-family: 'M PLUS Rounded 1c', sans-serif;
-        background-color: #FFFDF0; /* ポップなイエロー背景 */
+        background-color: #FFFDF0;
     }
     .stApp { background: #FFFDF0; }
 
-    /* カレンダー自体のポップなデザイン */
+    /* カレンダーのデザイン */
     .fc { 
         background: #FFFFFF !important; 
         border-radius: 20px !important; 
@@ -57,15 +57,15 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 固定カテゴリー設定 ---
+# --- ジャンル設定 ---
 GENRES = {
     "VTuber": {"emoji": "🌈", "words": ["ホロライブ", "さくらみこ", "にじさんじ"], "color": "#F472B6"},
-    "ポケモン": {"emoji": "🐾", "words": ["ポケモンセンター", "ポケモン"], "color": "#3B82F6"},
-    "ジャニーズ": {"emoji": "🎤", "words": ["timelesz", "Hey! Say! JUMP", "King & Prince", "Snow Man"], "color": "#FB923C"},
-    "ジャンプ": {"emoji": "👒", "words": ["ワンピース", "ONE PIECE", "ナルト", "NARUTO"], "color": "#F87171"},
+    "ポケモン": {"emoji": "🐾", "words": ["ポケモンセンター", "ポケモン", "ポケカ"], "color": "#3B82F6"},
+    "アイドル": {"emoji": "🎤", "words": ["timelesz", "Hey! Say! JUMP", "King & Prince", "なにわ男子", "Snow Man"], "color": "#FB923C"},
     "あんスタ": {"emoji": "✨", "words": ["あんさんぶるスターズ", "あんスタ"], "color": "#A78BFA"},
-    "テーマパーク": {"emoji": "🎡", "words": ["富士急", "ピューロランド", "USJ", "ディズニー"], "color": "#10B981"},
-    "その他": {"emoji": "🎁", "words": ["コラボカフェ"], "color": "#94A3B8"}
+    "ジャンプ": {"emoji": "👒", "words": ["ワンピース", "ONE PIECE", "ナルト", "NARUTO"], "color": "#F87171"},
+    "テーマパーク": {"emoji": "🎡", "words": ["富士急", "ピューロランド", "USJ", "ディズニー", "ナンジャタウン"], "color": "#10B981"},
+    "その他": {"emoji": "🎁", "words": ["コラボカフェ", "アニメイベント"], "color": "#94A3B8"}
 }
 
 TIMES = ["30分以内", "1時間以内", "1時間半以内", "2時間半以内", "それ以上"]
@@ -80,11 +80,13 @@ def get_access_info(loc):
     }
     return guides.get(loc, "交通機関を確認してください")
 
-# --- 日付・期間抽出エンジン ---
-def extract_dates(text):
-    year = datetime.now().year
+# --- 日付解析の強化（2026年対応） ---
+def extract_dates_2026(text):
+    now = datetime.now()
+    year = now.year
     sep = r'[〜~ー\-\s－]+'
-    # 期間形式
+    
+    # 期間: 8/1〜8/30
     m = re.search(r'(\d{1,2})[./月](\d{1,2}).*?{sep}(\d{1,2})[./月](\d{1,2})'.format(sep=sep), text)
     if m:
         try:
@@ -93,7 +95,8 @@ def extract_dates(text):
             if end < start: end = datetime(year + 1, int(m.group(3)), int(m.group(4)))
             return start, end
         except: pass
-    # 単発形式
+    
+    # 単発: 8/1
     m = re.search(r'(\d{1,2})[./月](\d{1,2})', text)
     if m:
         try:
@@ -102,22 +105,25 @@ def extract_dates(text):
         except: pass
     return None, None
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=1800)
 def fetch_data():
     all_events = []
-    headers = {"User-Agent": "Mozilla/5.0"}
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"}
     for gen, info in GENRES.items():
         for kw in info["words"][:3]:
             url = f"https://collabo-cafe.com/?s={kw}"
             try:
                 res = requests.get(url, headers=headers, timeout=10)
                 soup = BeautifulSoup(res.text, 'html.parser')
-                for art in soup.select('article')[:5]:
-                    title = (art.find('h2') or art.select_one('.entry-title')).get_text().strip()
+                articles = soup.select('article')
+                for art in articles[:5]:
+                    title_tag = art.find('h2') or art.select_one('.entry-title')
+                    if not title_tag: continue
+                    title = title_tag.get_text().strip()
                     link = art.find('a')['href']
-                    start_dt, end_dt = extract_dates(title)
                     
-                    # エリア判定 (小山駅起点)
+                    start_dt, end_dt = extract_dates_2026(title)
+                    
                     loc = "1時間半以内"
                     if any(x in title for x in ["宇都宮", "ベルモール"]): loc = "30分以内"
                     elif any(x in title for x in ["大宮", "さいたま"]): loc = "1時間以内"
@@ -134,11 +140,10 @@ def fetch_data():
             except: pass
     return all_events
 
-# --- メイン表示 ---
+# --- メイン画面 ---
 st.title("✨ 推しイベ")
-st.write("栃木県小山駅発 🚃 スケジュール・マップ")
+st.write("栃木県小山駅発 🚃 2026年最新スケジュール")
 
-# フィルター
 c1, c2 = st.columns(2)
 with c1: sel_gen = st.multiselect("ジャンル", list(GENRES.keys()), default=list(GENRES.keys()))
 with c2: sel_time = st.multiselect("小山からの時間", TIMES, default=["30分以内", "1時間以内", "1時間半以内"])
@@ -146,7 +151,7 @@ with c2: sel_time = st.multiselect("小山からの時間", TIMES, default=["30�
 data = fetch_data()
 filtered = [e for e in data if e['genre'] in sel_gen and e['time'] in sel_time]
 
-# 1. カレンダー表示
+# 1. カレンダー（スクロールなし・一本線表示）
 cal_events = []
 for e in filtered:
     cal_events.append({
@@ -155,28 +160,29 @@ for e in filtered:
         "extendedProps": {"full_title": e['full_title'], "url": e['url'], "time": e['time'], "gen": e['genre']}
     })
 
-# height='auto' でスクロールなし
 state = calendar(events=cal_events, options={"initialView": "dayGridMonth", "locale": "ja", "height": "auto", "headerToolbar": {"left": "prev,next", "center": "title", "right": ""}})
 
-# 2. 詳細表示 (カレンダーの下)
+# 2. 詳細表示
 if state.get("eventClick"):
     p = state["eventClick"]["event"]["extendedProps"]
     st.markdown(f"""
         <div class="pop-card">
-            <h3 style='color:#1E40AF; margin-top:0;'>✨ イベント詳細</h3>
+            <h3 style='color:#1E40AF; margin-top:0;'>✨ 詳細データ</h3>
             <p style='font-size:1.1em; font-weight:800; line-height:1.4;'>{p['full_title']}</p>
             <div style='margin-bottom:15px;'>
                 <span style='background:{GENRES[p['gen']]['color']}; color:white; padding:4px 12px; border-radius:50px; font-size:12px; font-weight:bold;'>{p['gen']}</span>
                 <span style='background:#3B82F6; color:white; padding:4px 12px; border-radius:50px; font-size:12px; font-weight:bold; margin-left:5px;'>📍 小山から{p['time']}</span>
             </div>
             <p style='background:#F8FAFC; padding:10px; border-radius:10px; font-size:0.9em; border:1px dashed #3B82F6;'>
-                <b>🚃 小山駅からのルート目安:</b><br>{get_access_info(p['time'])}
+                <b>🚃 ルート目安:</b><br>{get_access_info(p['time'])}
             </p>
             <a href="{p['url']}" target="_blank" style="text-decoration:none;">
                 <button style="width:100%; background:#3B82F6; color:white; border:none; padding:15px; border-radius:15px; font-weight:bold; cursor:pointer;">公式サイトを見に行く！ ➔</button>
             </a>
         </div>
     """, unsafe_allow_html=True)
+else:
+    st.info("💡 カレンダーのイベントをタップして詳細をチェック！")
 
 # 3. 週間ピックアップ
 st.subheader("📋 今週の予定")
