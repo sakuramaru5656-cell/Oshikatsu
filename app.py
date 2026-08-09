@@ -6,170 +6,144 @@ from datetime import datetime, timedelta
 from streamlit_calendar import calendar
 import re
 
-# --- ページ設定とモダンUI用のCSS ---
-st.set_page_config(page_title="HoloPoke Access", page_icon="🌸", layout="centered")
+# --- ページ設定 ---
+st.set_page_config(page_title="推しイベ", page_icon="📅", layout="centered")
 
+# --- モダンUIデザイン ---
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
-    html, body, [class*="css"] { font-family: 'Inter', sans-serif; background-color: #F8FAFC; }
+    html, body, [class*="css"] { font-family: 'Inter', sans-serif; background-color: #FFFFFF; }
     
-    /* カードのデザイン */
     .event-card {
-        background: white; border-radius: 16px; padding: 20px;
-        margin-bottom: 16px; border: 1px solid #F1F5F9;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        background: white; border-radius: 12px; padding: 16px;
+        margin-bottom: 12px; border: 1px solid #EDF2F7;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.04);
     }
-    
-    /* バッジ */
     .badge {
-        display: inline-block; padding: 4px 12px; border-radius: 9999px;
-        font-size: 12px; font-weight: 600; margin-right: 8px; margin-bottom: 8px;
+        display: inline-block; padding: 2px 10px; border-radius: 9999px;
+        font-size: 11px; font-weight: 600; margin-right: 5px;
     }
-    .time-30 { background-color: #DCFCE7; color: #166534; }
-    .time-60 { background-color: #DBEAFE; color: #1E40AF; }
-    .time-90 { background-color: #FEF9C3; color: #854D0E; }
-    .time-150 { background-color: #FFEDD5; color: #9A3412; }
-    .time-far { background-color: #FEE2E2; color: #991B1B; }
-    
+    .time-badge { background-color: #EDF2F7; color: #4A5568; }
     .event-title {
-        font-size: 18px; font-weight: 600; color: #1E293B;
-        text-decoration: none; margin-top: 8px; display: block;
+        font-size: 16px; font-weight: 600; color: #1A202C;
+        text-decoration: none; display: block; margin-top: 5px;
     }
-    .event-title:hover { color: #3B82F6; }
-    .info-text { color: #64748B; font-size: 14px; margin-top: 4px; }
+    /* カレンダーを小さくする */
+    .fc { font-size: 0.85em !important; }
+    .fc .fc-toolbar-title { font-size: 1.2em !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- カテゴリー定義 ---
-CATEGORIES = {
-    "VTuber (ホロライブ)": ["ホロライブ", "さくらみこ", "星街すいせい"],
-    "ポケモン": ["ポケモンセンター", "ポケモン", "ピカチュウ"],
-    "ジャニーズ系": ["timelesz", "Hey! Say! JUMP", "King & Prince"],
-    "ジャンプ系": ["ワンピース", "NARUTO", "呪術廻戦"],
-    "その他": ["コラボカフェ", "アニメ展示"]
+# --- カテゴリー・絵文字定義 ---
+GENRES = {
+    "VTuber": {"emoji": "🌈", "words": ["ホロライブ", "さくらみこ", "星街すいせい", "にじさんじ"]},
+    "ポケモン": {"emoji": "🐾", "words": ["ポケモンセンター", "ポケモン", "ピカチュウ"]},
+    "ジャニーズ系": {"emoji": "🎤", "words": ["timelesz", "Hey! Say! JUMP", "King & Prince", "なにわ男子", "Snow Man", "SixTONES", "WEST.", "Aぇ! group", "ライブ", "コンサート"]},
+    "ジャンプ(OP/ナルト)": {"emoji": "👒", "words": ["ワンピース", "ONE PIECE", "NARUTO", "ナルト"]},
+    "あんスタ": {"emoji": "✨", "words": ["あんさんぶるスターズ", "あんスタ"]},
+    "その他": {"emoji": "🎁", "words": ["コラボカフェ", "展示会"]}
 }
 
-# --- 高度な日付抽出関数 ---
-def extract_dates(text):
-    """タイトルや抜粋文から日付(開始・終了)を探す"""
-    year = datetime.now().year
-    # 期間形式: 8/10〜9/1, 8.10-9.1, 8月10日〜
-    range_match = re.search(r'(\d{1,2})[./月](\d{1,2}).*?[〜~ー\-](\d{1,2})[./月](\d{1,2})', text)
-    if range_match:
-        m1, d1, m2, d2 = map(int, range_match.groups())
-        return datetime(year, m1, d1), datetime(year, m2, d2)
-    
-    # 単発形式: 8/10
-    single_match = re.search(r'(\d{1,2})[./月](\d{1,2})', text)
-    if single_match:
-        m, d = map(int, single_match.groups())
-        dt = datetime(year, m, d)
-        return dt, dt
-    
-    return None, None
+TIMES = ["30分以内", "1時間以内", "1時間半以内", "2時間半以内", "それ以上"]
 
-# --- データ取得ロジック ---
+# --- データ取得 ---
 @st.cache_data(ttl=3600)
-def fetch_events(selected_cats, custom_kw):
-    search_keywords = []
-    for cat in selected_cats: search_keywords.extend(CATEGORIES[cat])
-    if custom_kw: search_keywords.append(custom_kw)
-    
+def fetch_events():
     all_events = []
     headers = {"User-Agent": "Mozilla/5.0"}
     
-    for kw in list(set(search_keywords))[:12]:
-        url = f"https://collabo-cafe.com/?s={kw}"
-        try:
-            res = requests.get(url, headers=headers, timeout=10)
-            soup = BeautifulSoup(res.text, 'html.parser')
-            for art in soup.select('article')[:8]:
-                title = art.select_one('.entry-title').get_text().strip()
-                excerpt = art.select_one('.entry-content').get_text().strip() if art.select_one('.entry-content') else ""
-                link = art.find('a')['href']
-                
-                # エリア判定
-                loc_label = "都内"
-                if any(x in title for x in ["宇都宮", "ベルモール"]): loc_label = "宇都宮"
-                elif any(x in title for x in ["大宮", "さいたま"]): loc_label = "大宮"
-                elif any(x in title for x in ["横浜", "幕張", "千葉", "Kアリーナ"]): loc_label = "横浜・千葉"
-                elif any(x in title for x in ["大阪", "名古屋", "福岡", "ドーム"]): loc_label = "遠方"
+    for genre_name, info in GENRES.items():
+        emoji = info["emoji"]
+        for kw in info["words"][:5]: # 各ワード上位
+            url = f"https://collabo-cafe.com/?s={kw}"
+            try:
+                res = requests.get(url, headers=headers, timeout=10)
+                soup = BeautifulSoup(res.text, 'html.parser')
+                for art in soup.select('article')[:6]:
+                    title = art.select_one('.entry-title').get_text().strip()
+                    link = art.find('a')['href']
+                    
+                    # 小山駅からの時間判定
+                    loc_label = "都内"
+                    if any(x in title for x in ["宇都宮", "ベルモール"]): loc_label = "30分以内"
+                    elif any(x in title for x in ["大宮", "さいたま"]): loc_label = "1時間以内"
+                    elif any(x in title for x in ["横浜", "幕張", "千葉", "Kアリーナ"]): loc_label = "2時間半以内"
+                    elif any(x in title for x in ["大阪", "名古屋", "福岡", "札幌"]): loc_label = "それ以上"
+                    else: loc_label = "1時間半以内"
 
-                access_map = {
-                    "宇都宮": ("time-30", "30分以内", "JR宇都宮線"),
-                    "大宮": ("time-60", "1時間以内", "宇都宮線 快速"),
-                    "都内": ("time-90", "1時間半以内", "上野東京ライン"),
-                    "横浜・千葉": ("time-150", "2時間半以内", "湘南新宿ライン"),
-                    "遠方": ("time-far", "それ以上", "新幹線・特急"),
-                }
-                css_class, label, way = access_map.get(loc_label)
-
-                # 日付抽出（タイトルと抜粋の両方から探す）
-                start_dt, end_dt = extract_dates(title + excerpt)
-                has_date = start_dt is not None
-
-                all_events.append({
-                    "title": title,
-                    "start": start_dt.strftime("%Y-%m-%d") if has_date else None,
-                    "end": end_dt.strftime("%Y-%m-%d") if has_date else None,
-                    "has_date": has_date,
-                    "css": css_class, "label": label, "way": way, "url": link, "kw": kw
-                })
-        except: pass
+                    # 日付解析
+                    start_dt = None
+                    date_match = re.search(r'(\d+)月(\d+)日', title)
+                    if date_match:
+                        try: start_dt = datetime(2024, int(date_match.group(1)), int(date_match.group(2)))
+                        except: pass
+                    
+                    all_events.append({
+                        "title": f"{emoji} {kw}", # カレンダーには絵文字+ワード
+                        "full_title": title,
+                        "start": start_dt.strftime("%Y-%m-%d") if start_dt else None,
+                        "url": link,
+                        "genre": genre_name,
+                        "time": loc_label,
+                        "has_date": start_dt is not None
+                    })
+            except: pass
     return all_events
 
-# --- メイン画面 ---
-st.title("🌸 HoloPoke Access")
-st.markdown(f"<p style='color: #64748B;'>小山駅から推しのイベントへ。リンクは新しいタブで開きます。</p>", unsafe_allow_html=True)
+# --- アプリ画面構成 ---
+st.title("推しイベ")
 
-with st.sidebar:
-    st.subheader("絞り込み")
-    selected_cats = [cat for cat in CATEGORIES.keys() if st.checkbox(cat, value=True)]
-    selected_times = st.multiselect("所要時間", ["30分以内", "1時間以内", "1時間半以内", "2時間半以内", "それ以上"], default=["30分以内", "1時間以内", "1時間半以内"])
-    custom_kw = st.text_input("追加検索")
+# 1. フィルターボタン (カレンダーの上に配置)
+col1, col2 = st.columns([2, 1])
+with col1:
+    selected_genres = st.pills("ジャンル", list(GENRES.keys()), selection_mode="multi", default=list(GENRES.keys()))
+with col2:
+    selected_times = st.pills("移動時間", TIMES, selection_mode="multi", default=["30分以内", "1時間以内", "1時間半以内"])
 
-data = fetch_events(selected_cats, custom_kw)
-filtered_data = [e for e in data if e['label'] in selected_times]
+# データ取得とフィルタリング
+data = fetch_events()
+filtered = [e for e in data if e['genre'] in selected_genres and e['time'] in selected_times]
 
-tab1, tab2, tab3 = st.tabs(["📅 カレンダー", "📋 直近の週間予定", "🔍 全リスト(日付未定含む)"])
+# 2. カレンダー表示 (小さめに設定)
+tab1, tab2 = st.tabs(["📅 カレンダー", "📋 リスト形式"])
 
 with tab1:
-    # 日付があるものだけ表示
     cal_events = []
-    for e in [x for x in filtered_data if x['has_date']]:
-        color = "#22C55E" if "30分" in e['label'] else "#3B82F6" if "1時間" in e['label'] else "#EAB308" if "1時間半" in e['label'] else "#EF4444"
-        cal_events.append({"title": e['title'], "start": e['start'], "end": e['end'], "color": color, "url": e['url']})
+    # カレンダー用カラー設定
+    colors = {"VTuber": "#E2E8F0", "ポケモン": "#FEE2E2", "ジャニーズ系": "#FEF9C3", "ジャンプ(OP/ナルト)": "#DBEAFE", "あんスタ": "#F3E8FF"}
     
-    if not cal_events:
-        st.info("カレンダーに表示できる日付確定イベントがありません。")
-    else:
-        calendar(events=cal_events, options={"initialView": "dayGridMonth", "locale": "ja"})
-        st.caption("※カレンダー内のリンクはシステムの制限で同じタブで開く場合があります。リスト形式の使用をおすすめします。")
+    for e in [x for x in filtered if x['has_date']]:
+        cal_events.append({
+            "title": e['title'], 
+            "start": e['start'], 
+            "url": e['url'], 
+            "color": colors.get(e['genre'], "#EDF2F7"),
+            "textColor": "#1A202C"
+        })
+    
+    calendar_options = {
+        "initialView": "dayGridMonth",
+        "height": "450px", # 高さを一段階小さく
+        "locale": "ja",
+        "headerToolbar": {"left": "prev,next", "center": "title", "right": ""},
+    }
+    calendar(events=cal_events, options=calendar_options)
+    st.caption("※カレンダーの絵文字をタップすると詳細（外部サイト）が開きます")
 
 with tab2:
-    today = datetime.now().date()
-    week_events = [e for e in filtered_data if e['has_date'] and today <= datetime.strptime(e['start'], "%Y-%m-%d").date() <= today + timedelta(days=7)]
-    if not week_events:
-        st.write("今後7日間の予定はありません")
+    if not filtered:
+        st.write("該当するイベントはありません")
     else:
-        for e in sorted(week_events, key=lambda x: x['start']):
+        for e in sorted(filtered, key=lambda x: (not x['has_date'], x['start'] or "")):
             st.markdown(f"""
             <div class="event-card">
-                <span class="badge {e['css']}">{e['label']}</span>
-                <span class="badge" style="background:#F1F5F9; color:#475569;">{e['kw']}</span>
-                <a href="{e['url']}" target="_blank" class="event-title">{e['title']}</a>
-                <div class="info-text">📅 {e['start']} | 🚃 {e['way']} (小山駅発)</div>
+                <span class="badge time-badge">📍 {e['time']}</span>
+                <span class="badge" style="background:#F7FAFC;">{GENRES[e['genre']]['emoji']} {e['genre']}</span>
+                <a href="{e['url']}" target="_blank" class="event-title">{e['full_title']}</a>
+                <div style="font-size:12px; color:#718096; margin-top:4px;">📅 {e['start'] if e['has_date'] else '日付未定'}</div>
             </div>
             """, unsafe_allow_html=True)
 
-with tab3:
-    for e in sorted(filtered_data, key=lambda x: (not x['has_date'], x['start'] or "")):
-        date_display = e['start'] if e['has_date'] else "日付未定（詳細確認）"
-        st.markdown(f"""
-        <div class="event-card">
-            <span class="badge {e['css']}">{e['label']}</span>
-            <a href="{e['url']}" target="_blank" class="event-title">{e['title']}</a>
-            <div class="info-text">📅 {date_display}</div>
-        </div>
-        """, unsafe_allow_html=True)
+st.markdown("---")
+st.caption("小山駅を起点に計算しています。")
