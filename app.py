@@ -3,104 +3,123 @@ import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 from datetime import datetime, timedelta
+from streamlit_calendar import calendar
+import re
 
 # ページ設定
-st.set_page_config(page_title="オタ活アクセス検索(小山発)", layout="wide")
+st.set_page_config(page_title="オタ活カレンダー(小山発)", layout="wide")
 
-st.title("🌸 アニレコ！- 小山発イベント検索")
-st.caption("栃木県小山市から「推し事」への最短ルートを判定します")
+# --- CSSで見た目を調整 ---
+st.markdown("""
+    <style>
+    .stApp { background-color: #fdfbfb; }
+    .main .block-container { padding-top: 2rem; }
+    </style>
+    """, unsafe_allow_html=True)
 
-# --- 設定（サイドバー） ---
+st.title("🌸 推し活アクセス・カレンダー")
+st.caption("栃木県小山駅からイベント会場までの「時間」を色で表示します")
+
+# --- サイドバー設定 ---
 with st.sidebar:
-    st.header("🔍 検索設定")
-    keyword_input = st.text_input("検索キーワード（カンマ区切り）", value="さくらみこ, ホロライブ")
+    st.header("⚙️ 設定")
+    keywords = st.text_input("検索ワード（カンマ区切り）", value="さくらみこ, ホロライブ")
     
     st.header("⏳ 移動時間フィルター")
-    time_filter = st.multiselect(
-        "許容できる移動時間",
+    selected_times = st.multiselect(
+        "表示する範囲",
         ["30分以内", "1時間以内", "1時間半以内", "2時間半以内", "それ以上"],
         default=["30分以内", "1時間以内", "1時間半以内", "2時間半以内", "それ以上"]
     )
-    
-    departure = "小山駅"
-    st.info(f"出発地点: {departure}")
+    st.info("📍 出発：小山駅")
 
-# --- データ取得ロジック ---
-def fetch_events(keywords):
+# --- データ取得・解析 ---
+@st.cache_data(ttl=3600)
+def get_event_data(keywords_str):
     all_events = []
+    kw_list = [k.strip() for k in keywords_str.split(",")]
     headers = {"User-Agent": "Mozilla/5.0"}
-    for kw in keywords:
-        url = f"https://collabo-cafe.com/?s={kw.strip()}"
+    
+    for kw in kw_list:
+        url = f"https://collabo-cafe.com/?s={kw}"
         try:
             res = requests.get(url, headers=headers, timeout=5)
             soup = BeautifulSoup(res.text, 'html.parser')
-            for art in soup.find_all('article')[:8]:
+            for art in soup.find_all('article')[:10]:
                 title = art.find('h2').get_text().strip()
                 link = art.find('a')['href']
                 
-                # エリア判定ロジック
+                # エリアと時間の判定ロジック
                 loc = "都内"
                 if "大阪" in title: loc = "大阪"
                 elif "名古屋" in title: loc = "名古屋"
                 elif "横浜" in title: loc = "横浜"
                 elif "宇都宮" in title: loc = "宇都宮"
                 elif "大宮" in title: loc = "大宮"
+
+                # 小山駅からのアクセス判定 (時間, ラベル, 色, 手段)
+                access_map = {
+                    "宇都宮": (30, "30分以内", "#28a745", "JR宇都宮線"), # 緑
+                    "大宮": (50, "1時間以内", "#007bff", "宇都宮線 快速"), # 青
+                    "都内": (80, "1時間半以内", "#f1c40f", "上野東京ライン"), # 黄
+                    "横浜": (130, "2時間半以内", "#e67e22", "湘南新宿ライン"), # 橙
+                    "大阪": (220, "それ以上", "#e74c3c", "新幹線"), # 赤
+                    "名古屋": (180, "それ以上", "#e74c3c", "新幹線"), # 赤
+                }
+                mins, label, color, way = access_map.get(loc, (999, "不明", "#95a5a6", "要確認"))
                 
-                # 仮の日付（本来は詳細ページから取得）
-                date = datetime.now() + timedelta(days=len(all_events) * 2)
-                all_events.append({"date": date, "name": title, "loc": loc, "url": link})
+                # 日付の抽出（デモ用にタイトルから推測、なければ今日から順に割り振り）
+                date_match = re.search(r'(\d+)月(\d+)日', title)
+                if date_match:
+                    day = datetime(2024, int(date_match.group(1)), int(date_match.group(2)))
+                else:
+                    day = datetime.now() + timedelta(days=len(all_events) % 14)
+
+                all_events.append({
+                    "title": f"【{label}】{title}",
+                    "start": day.strftime("%Y-%m-%d"),
+                    "end": day.strftime("%Y-%m-%d"),
+                    "color": color,
+                    "url": link,
+                    "cat": label,
+                    "way": way,
+                    "loc": loc
+                })
         except: pass
-    return pd.DataFrame(all_events)
+    return all_events
 
-def get_access(loc):
-    rules = {
-        "宇都宮": (30, "30分以内", "JR宇都宮線", "🟢"),
-        "大宮": (50, "1時間以内", "宇都宮線 快速", "🔵"),
-        "都内": (80, "1時間半以内", "上野東京ライン", "🟡"),
-        "横浜": (130, "2時間半以内", "湘南新宿ライン", "🟠"),
-        "大阪": (220, "それ以上", "新幹線", "🔴"),
-        "名古屋": (180, "それ以上", "新幹線", "🔴"),
+# --- メイン表示 ---
+event_list = get_event_data(keywords)
+# フィルター適用
+filtered_events = [e for e in event_list if e['cat'] in selected_times]
+
+# カレンダーの表示形式を選択
+view_mode = st.radio("表示モード", ["月間カレンダー", "週間スケジュール", "リスト形式"], horizontal=True)
+
+if view_mode == "月間カレンダー":
+    calendar_options = {
+        "initialView": "dayGridMonth",
+        "headerToolbar": {"left": "prev,next today", "center": "title", "right": "dayGridMonth,dayGridWeek"},
+        "selectable": True,
     }
-    return rules.get(loc, (999, "不明", "要確認", "⚪"))
+    calendar(events=filtered_events, options=calendar_options)
 
-# --- メイン処理 ---
-keywords = keyword_input.split(",")
-df = fetch_events(keywords)
-
-if not df.empty:
-    # アクセス情報適用
-    df['access'] = df['loc'].apply(get_access)
-    df['min'] = df['access'].apply(lambda x: x[0])
-    df['cat'] = df['access'].apply(lambda x: x[1])
-    df['way'] = df['access'].apply(lambda x: x[2])
-    df['icon'] = df['access'].apply(lambda x: x[3])
-    df = df.sort_values('min')
-
-    # フィルター適用
-    df = df[df['cat'].isin(time_filter)]
-
-    # タブ表示
-    tab1, tab2 = st.tabs(["📅 今月（全件）", "🗓 週間表示"])
-
-    with tab1:
-        for _, row in df.iterrows():
-            with st.container():
-                col1, col2 = st.columns([1, 4])
-                with col1:
-                    st.write(f"### {row['icon']}")
-                    st.caption(row['cat'])
-                with col2:
-                    st.markdown(f"**[{row['name']}]({row['url']})**")
-                    st.caption(f"📅 {row['date'].strftime('%m/%d')} | 📍 {row['loc']} | 🚃 {row['way']}")
-                st.divider()
-
-    with tab2:
-        next_week = datetime.now() + timedelta(days=7)
-        weekly_df = df[df['date'] <= next_week]
-        if weekly_df.empty:
-            st.write("今週の予定はありません")
-        else:
-            st.dataframe(weekly_df[['date', 'cat', 'name']], hide_index=True)
+elif view_mode == "週間スケジュール":
+    calendar_options = {
+        "initialView": "listWeek",
+        "headerToolbar": {"left": "prev,next today", "center": "title", "right": ""},
+    }
+    calendar(events=filtered_events, options=calendar_options)
 
 else:
-    st.warning("イベントが見つかりませんでした。キーワードを変えてみてください。")
+    for e in filtered_events:
+        st.markdown(f"""
+        <div style="border-left: 5px solid {e['color']}; padding: 10px; margin-bottom: 10px; background: white; border-radius: 5px; box-shadow: 1px 1px 3px rgba(0,0,0,0.1);">
+            <small>{e['start']} | {e['cat']} ({e['way']})</small><br>
+            <strong><a href="{e['url']}" target="_blank" style="color: #333; text-decoration: none;">{e['title']}</a></strong>
+        </div>
+        """, unsafe_allow_html=True)
+
+st.markdown("---")
+st.caption("💡 色の意味（小山駅からの所要時間）:")
+st.markdown("🟢30分以内 | 🔵1時間以内 | 🟡1時間半以内 | 🟠2時間半以内 | 🔴それ以上")
