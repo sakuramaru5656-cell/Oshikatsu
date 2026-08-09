@@ -6,115 +6,109 @@ from datetime import datetime, timedelta
 from streamlit_calendar import calendar
 import re
 
-# --- ページ設定と超ポップなCSS ---
-st.set_page_config(page_title="推しイベ・図鑑", page_icon="🎡", layout="centered")
+# --- ページ設定とポップなデザインCSS ---
+st.set_page_config(page_title="推しイベ", page_icon="✨", layout="centered")
 
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@700;800&display=swap');
     
-    /* 全体背景 */
+    /* 全体の背景 */
     html, body, [class*="css"] {
         font-family: 'M PLUS Rounded 1c', sans-serif;
-        background-color: #FFCC00; /* ピカチュウイエロー */
+        background-color: #FFFDF0; /* 優しいクリームイエロー */
     }
-    .stApp { background: #FFCC00; }
+    .stApp { background: #FFFDF0; }
 
-    /* 図鑑の外枠デザイン */
-    .pokedex-frame {
-        background: #CC0000; /* レッド */
-        border: 10px solid #8B0000;
-        border-radius: 30px;
-        padding: 20px;
-        box-shadow: 0 15px 0 #8B0000;
-        margin-bottom: 30px;
-    }
-
-    /* カレンダー（モニター画面） */
+    /* カレンダー自体のポップ化 */
     .fc { 
-        background: #E0E0E0 !important; /* 液晶風グレー */
-        border-radius: 10px; 
-        border: 8px solid #333 !important;
-        padding: 5px;
+        background: #FFFFFF !important; 
+        border-radius: 20px !important; 
+        border: 4px solid #3B82F6 !important; /* 明るいブルー */
+        padding: 10px;
+        box-shadow: 0 8px 20px rgba(0,0,0,0.05);
     }
-    .fc-toolbar-title { color: #333 !important; font-weight: 800 !important; }
-    .fc-daygrid-day-number { color: #333 !important; font-weight: bold; }
     
-    /* イベントバーのスタイル */
+    /* カレンダーのヘッダー（月表示部分） */
+    .fc-toolbar-title { 
+        color: #1E40AF !important; 
+        font-size: 1.5em !important;
+        background: #DBEAFE;
+        padding: 5px 20px;
+        border-radius: 50px;
+    }
+    
+    /* 曜日ヘッダー */
+    .fc-col-header-cell { background: #F1F5F9; border-radius: 10px; }
+    .fc-col-header-cell-cushion { color: #475569 !important; padding: 5px 0; }
+    
+    /* 土日の色付け */
+    .fc-day-sun .fc-col-header-cell-cushion { color: #EF4444 !important; } /* 日曜：赤 */
+    .fc-day-sat .fc-col-header-cell-cushion { color: #3B82F6 !important; } /* 土曜：青 */
+
+    /* イベントバー（一本線）のポップ化 */
     .fc-event {
-        border-radius: 20px !important;
-        border: 2px solid rgba(0,0,0,0.2) !important;
-        padding: 2px 5px !important;
-        box-shadow: 2px 2px 0px rgba(0,0,0,0.1);
+        border-radius: 8px !important;
+        border: none !important;
+        padding: 2px 4px !important;
+        font-weight: 800 !important;
+        font-size: 0.9em !important;
+        box-shadow: 2px 2px 0px rgba(0,0,0,0.1) !important;
     }
 
-    /* ポケモン図鑑風カード */
-    .detail-card {
-        background: #FFFFFF;
-        border: 5px solid #3B4CCA; /* ブルー */
+    /* ポップな詳細カード */
+    .pop-detail-card {
+        background: white;
         border-radius: 25px;
-        padding: 20px;
+        padding: 25px;
         margin-top: 20px;
-        position: relative;
-    }
-    .detail-card::before {
-        content: "■■■";
-        position: absolute; top: 10px; right: 20px; color: #3B4CCA; letter-spacing: 5px;
+        border: 4px solid #3B82F6;
+        box-shadow: 8px 8px 0px #BFDBFE;
     }
 
-    /* タイプバッジ */
-    .type-pill {
-        display: inline-block;
-        padding: 5px 15px;
-        border-radius: 20px;
-        font-size: 13px;
-        color: white;
-        text-shadow: 1px 1px 0px #000;
-        margin: 5px 2px;
+    .transport-box {
+        background: #F8FAFC;
+        border-radius: 12px;
+        padding: 15px;
+        border: 2px dashed #CBD5E1;
+        margin: 10px 0;
     }
 
-    /* ボタン */
-    .stButton>button {
-        background: #3B4CCA;
-        color: white;
-        border-radius: 15px;
-        border: 4px solid #2A3693;
-        font-weight: 800;
-        box-shadow: 0 4px 0 #2A3693;
+    /* フィルターのピルボタン */
+    .stMultiSelect [data-baseweb="tag"] {
+        background-color: #3B82F6 !important;
+        border-radius: 10px !important;
     }
-    .stButton>button:active { transform: translateY(4px); box-shadow: none; }
     </style>
     """, unsafe_allow_html=True)
 
 # --- カテゴリー定義 ---
 GENRES = {
-    "VTuber": {"emoji": "🌈", "words": ["ホロライブ", "さくらみこ", "にじさんじ"], "color": "#FF66CC"},
-    "ポケモン": {"emoji": "🐾", "words": ["ポケモンセンター", "ポケモン", "ピカチュウ"], "color": "#3B4CCA"},
-    "ジャニーズ": {"emoji": "🎤", "words": ["timelesz", "Hey! Say! JUMP", "King & Prince", "Snow Man"], "color": "#FF9900"},
-    "ジャンプ": {"emoji": "👒", "words": ["ワンピース", "ONE PIECE", "ナルト", "NARUTO"], "color": "#FF3300"},
-    "あんスタ": {"emoji": "✨", "words": ["あんさんぶるスターズ", "あんスタ"], "color": "#9966FF"},
-    "テーマパーク": {"emoji": "🎡", "words": ["富士急ハイランド", "ピューロランド", "USJ", "ディズニー", "ナンジャタウン"], "color": "#00CC99"},
-    "その他": {"emoji": "🎁", "words": ["コラボカフェ", "アニメ展示"], "color": "#666666"}
+    "VTuber": {"emoji": "🌈", "words": ["ホロライブ", "さくらみこ", "星街すいせい", "にじさんじ"], "color": "#F472B6"},
+    "ポケモン": {"emoji": "🐾", "words": ["ポケモンセンター", "ポケモン", "ピカチュウ"], "color": "#3B82F6"},
+    "ジャニーズ": {"emoji": "🎤", "words": ["timelesz", "Hey! Say! JUMP", "King & Prince", "Snow Man", "なにわ男子"], "color": "#FB923C"},
+    "ジャンプ": {"emoji": "👒", "words": ["ワンピース", "ONE PIECE", "ナルト", "NARUTO"], "color": "#F87171"},
+    "あんスタ": {"emoji": "✨", "words": ["あんさんぶるスターズ", "あんスタ"], "color": "#A78BFA"},
+    "テーマパーク": {"emoji": "🎡", "words": ["富士急", "ピューロランド", "USJ", "ディズニー", "ナンジャタウン", "ジョイポリス"], "color": "#34D399"},
+    "その他": {"emoji": "🎁", "words": ["コラボカフェ", "アニメイベント"], "color": "#94A3B8"}
 }
 
 TIMES = ["30分以内", "1時間以内", "1時間半以内", "2時間半以内", "それ以上"]
 
-# --- 交通アクセス(小山駅発) ---
-def get_access_v2(loc):
-    if loc == "30分以内":
-        return "🚃 JR宇都宮線 (25分) | 🚗 車 (40分)"
-    elif loc == "1時間以内":
-        return "🚄 新幹線なすの (15分) | 🚃 JR快速 (45分)"
-    elif loc == "1時間半以内":
-        return "🚄 新幹線 (40分) | 🚃 上野東京ライン (80分)"
-    elif loc == "2時間半以内":
-        return "🚃 湘南新宿ライン (130分) | 🚄 新幹線+JR"
-    else:
-        return "🚄 新幹線 / ✈️ 飛行機 / 🚌 高速バス"
+# --- 交通手段の判定 ---
+def get_transport_guide(loc):
+    guides = {
+        "30分以内": "🚃 **JR宇都宮線** (約25分) または 🚗 **車** (約40分)",
+        "1時間以内": "🚄 **新幹線なすの** (約15分) または 🚃 **宇都宮線 快速** (約45分)",
+        "1時間半以内": "🚄 **新幹線** (約40分) または 🚃 **上野東京ライン** (約80分)",
+        "2時間半以内": "🚃 **湘南新宿ライン** (約130分) または 🚄 **新幹線＋JR線**",
+        "それ以上": "🚄 **新幹線** / ✈️ **飛行機** / 🚌 **高速バス** を利用"
+    }
+    return guides.get(loc, "交通機関を確認してください")
 
-# --- 検索＆解析 ---
+# --- データ取得 ---
 @st.cache_data(ttl=3600)
-def fetch_all_events():
+def fetch_data():
     all_events = []
     headers = {"User-Agent": "Mozilla/5.0"}
     year = datetime.now().year
@@ -129,7 +123,7 @@ def fetch_all_events():
                     title = art.select_one('.entry-title').get_text().strip()
                     link = art.find('a')['href']
                     
-                    # 日付期間の抽出
+                    # 期間抽出
                     start_dt = end_dt = None
                     m = re.search(r'(\d{1,2})[./月](\d{1,2}).*?[〜~ー\-](\d{1,2})[./月](\d{1,2})', title)
                     if m:
@@ -143,16 +137,14 @@ def fetch_all_events():
                     # エリア判定
                     loc = "1時間半以内"
                     if any(x in title for x in ["宇都宮", "ベルモール"]): loc = "30分以内"
-                    elif any(x in title for x in ["大宮", "さいたま"]): loc = "1時間以内"
-                    elif any(x in title for x in ["横浜", "幕張", "千葉", "富士急", "ピューロランド"]): loc = "2時間半以内"
-                    elif any(x in title for x in ["大阪", "名古屋", "福岡", "USJ"]): loc = "それ以上"
+                    elif any(x in title for x in ["大宮", "さいたまスーパーアリーナ"]): loc = "1時間以内"
+                    elif any(x in title for x in ["横浜", "幕張", "千葉", "ぴあアリーナ", "Kアリーナ", "富士急", "ピューロランド"]): loc = "2時間半以内"
+                    elif any(x in title for x in ["大阪", "名古屋", "USJ", "ドーム"]): loc = "それ以上"
 
                     if start_dt:
                         all_events.append({
-                            "id": f"{kw}-{title[:10]}",
-                            "title": f"{info['emoji']} {kw}",
-                            "full_title": title,
-                            "start": start_dt.strftime("%Y-%m-%d"),
+                            "id": f"{kw}-{title[:5]}", "title": f"{info['emoji']} {kw}",
+                            "full_title": title, "start": start_dt.strftime("%Y-%m-%d"),
                             "end": (end_dt + timedelta(days=1)).strftime("%Y-%m-%d"),
                             "genre": gen, "time": loc, "url": link, "color": info["color"]
                         })
@@ -160,68 +152,70 @@ def fetch_all_events():
     return all_events
 
 # --- メイン画面 ---
-st.title("🐾 推しイベ・図鑑 Ver.2")
-st.write("栃木県小山駅からの冒険がはじまる！")
+st.title("✨ 推しイベ")
+st.write("栃木県小山駅発 🚃 冒険スケジュール")
 
-# フィルター
-col1, col2 = st.columns(2)
-with col1:
-    selected_gen = st.multiselect("タイプを選択", list(GENRES.keys()), default=list(GENRES.keys()))
-with col2:
-    selected_time = st.multiselect("距離を選択", TIMES, default=["30分以内", "1時間以内", "1時間半以内"])
+# フィルタ
+c1, c2 = st.columns(2)
+with c1:
+    sel_gen = st.multiselect("ジャンル", list(GENRES.keys()), default=list(GENRES.keys()))
+with c2:
+    sel_time = st.multiselect("小山からの時間", TIMES, default=["30分以内", "1時間以内", "1時間半以内"])
 
-# データ準備
-data = fetch_all_events()
-filtered = [e for e in data if e['genre'] in selected_gen and e['time'] in selected_time]
+# データ反映
+data = fetch_data()
+filtered = [e for e in data if e['genre'] in sel_gen and e['time'] in sel_time]
 
-# カレンダー表示（図鑑フレーム内）
-st.markdown('<div class="pokedex-frame">', unsafe_allow_html=True)
+# カレンダー表示
 cal_events = []
 for e in filtered:
     cal_events.append({
         "id": e['id'], "title": e['title'], "start": e['start'], "end": e['end'],
-        "backgroundColor": e['color'], "borderColor": "rgba(0,0,0,0.1)",
+        "backgroundColor": e['color'], "borderColor": "rgba(0,0,0,0.05)",
         "extendedProps": {"full_title": e['full_title'], "url": e['url'], "time": e['time'], "gen": e['genre']}
     })
 
-state = calendar(events=cal_events, options={"initialView": "dayGridMonth", "locale": "ja", "height": "500px"})
-st.markdown('</div>', unsafe_allow_html=True)
+state = calendar(events=cal_events, options={
+    "initialView": "dayGridMonth",
+    "locale": "ja",
+    "height": "520px",
+    "headerToolbar": {"left": "prev,next", "center": "title", "right": ""},
+})
 
-# 図鑑詳細
+# 詳細表示（ポップなカード）
 if state.get("eventClick"):
     p = state["eventClick"]["event"]["extendedProps"]
-    access = get_access_v2(p['time'])
     st.markdown(f"""
-        <div class="detail-card">
-            <h3 style='color:#3B4CCA;'>📕 イベント詳細データ</h3>
-            <p style='font-size:1.1em; font-weight:bold;'>{p['full_title']}</p>
-            <div style='margin:10px 0;'>
-                <span class="type-pill" style="background:{GENRES[p['gen']]['color']}">{p['gen']}</span>
-                <span class="type-pill" style="background:#3B4CCA">📍 小山から{p['time']}</span>
+        <div class="pop-detail-card">
+            <h3 style='color:#1E40AF; margin-top:0;'>✨ イベント詳細</h3>
+            <p style='font-size:1.1em; font-weight:800; line-height:1.4;'>{p['full_title']}</p>
+            <div style='margin-bottom:15px;'>
+                <span style='background:{GENRES[p['gen']]['color']}; color:white; padding:4px 12px; border-radius:50px; font-size:12px; font-weight:bold;'>{p['gen']}</span>
+                <span style='background:#3B82F6; color:white; padding:4px 12px; border-radius:50px; font-size:12px; font-weight:bold; margin-left:5px;'>📍 小山から{p['time']}</span>
             </div>
-            <p style='background:#f0f0f0; padding:10px; border-radius:10px; font-size:0.9em;'>
-                <b>👣 アクセスルート:</b><br>{access}
-            </p>
+            <div class="transport-box">
+                <b>🚃 小山駅からのルート目安:</b><br>
+                {get_transport_guide(p['time'])}
+            </div>
             <a href="{p['url']}" target="_blank" style="text-decoration:none;">
-                <button style="width:100%; padding:12px; margin-top:10px; cursor:pointer;">
-                    この場所へ GO！ ➔
+                <button style="width:100%; background:#3B82F6; color:white; border:none; padding:15px; border-radius:15px; font-weight:bold; cursor:pointer; font-size:16px; box-shadow:0 4px 0 #1E40AF;">
+                    公式サイトを見に行く！ ➔
                 </button>
             </a>
         </div>
     """, unsafe_allow_html=True)
-else:
-    st.info("💡 カレンダーの中のイベントをタップして、データを表示しよう！")
 
 # 週間リスト
-st.subheader("📋 今週のイベント")
+st.subheader("📋 今週のピックアップ")
 today = datetime.now().date()
+week_later = today + timedelta(days=7)
 for e in sorted(filtered, key=lambda x: x['start']):
     evt_start = datetime.strptime(e['start'], "%Y-%m-%d").date()
-    if today <= evt_start <= today + timedelta(days=7):
+    if today <= evt_start <= week_later:
         st.markdown(f"""
-        <div style="background:white; border-radius:15px; padding:15px; margin-bottom:10px; border-left:10px solid {e['color']};">
-            <small>{e['start']} | {e['genre']}</small><br>
-            <b>{e['full_title']}</b><br>
-            <small style='color:#666;'>🚃 {get_access_v2(e['time'])}</small>
+        <div style="background:white; border-radius:15px; padding:15px; margin-bottom:10px; border-left:8px solid {e['color']}; box-shadow:2px 2px 10px rgba(0,0,0,0.05);">
+            <small style='color:#64748B;'>{e['start']} | {e['genre']}</small><br>
+            <b style='color:#1E293B;'>{e['full_title']}</b><br>
+            <small style='color:#3B82F6;'>🚃 {get_transport_guide(e['time'])}</small>
         </div>
         """, unsafe_allow_html=True)
