@@ -6,38 +6,18 @@ from datetime import datetime, timedelta
 from streamlit_calendar import calendar
 import re
 
-# --- ページ設定とデザイン ---
-st.set_page_config(page_title="小山発・推し活ナビ", layout="wide", initial_sidebar_state="expanded")
+# --- ページ設定 ---
+st.set_page_config(page_title="小山発・推し活ナビPRO", layout="wide")
 
-# カスタムCSSでUIを劇的に改善
+# スタイル改善
 st.markdown("""
     <style>
-    .main { background-color: #f7f9fc; }
-    .stMetric { background-color: white; padding: 10px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
     .event-card {
-        background-color: white;
-        border-radius: 12px;
-        padding: 20px;
-        margin-bottom: 15px;
-        border-left: 8px solid;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-        transition: transform 0.2s;
+        background: white; padding: 15px; border-radius: 10px;
+        border-left: 10px solid; margin-bottom: 10px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
     }
-    .event-card:hover { transform: translateY(-2px); box-shadow: 0 6px 12px rgba(0,0,0,0.1); }
-    .time-badge {
-        padding: 4px 12px;
-        border-radius: 20px;
-        color: white;
-        font-size: 0.8em;
-        font-weight: bold;
-    }
-    .cate-badge {
-        background-color: #eee;
-        padding: 2px 8px;
-        border-radius: 4px;
-        font-size: 0.7em;
-        color: #666;
-    }
+    .date-badge { font-weight: bold; color: #444; background: #eee; padding: 2px 8px; border-radius: 5px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -50,31 +30,38 @@ CATEGORIES = {
     "その他": ["アニメ", "コラボカフェ"]
 }
 
-# --- サイドバー設定 ---
-with st.sidebar:
-    st.title("📍 小山駅起点")
-    st.markdown("---")
+# --- 日付・期間解析エンジン (AI的アプローチ) ---
+def parse_event_dates(text):
+    """
+    タイトルや本文から開催期間(開始日・終了日)をAI的に推測する
+    """
+    now = datetime.now()
+    year = now.year
     
-    st.header("1. ジャンル選択")
-    selected_cats = [cat for cat in CATEGORIES.keys() if st.checkbox(cat, value=True)]
-    
-    st.header("2. 移動時間")
-    time_limit = st.multiselect(
-        "許容できる範囲",
-        ["30分以内", "1時間以内", "1時間半以内", "2時間半以内", "それ以上"],
-        default=["30分以内", "1時間以内", "1時間半以内"]
-    )
-    
-    st.header("3. カスタム検索")
-    custom_kw = st.text_input("追加したいキーワード")
-    
-    st.divider()
-    st.caption("小山駅からイベント会場までの「交通手段」と「所要時間」を考慮して表示します。")
+    # パターン1: 8.10(土)〜9.1(日) のような形式
+    range_match = re.search(r'(\d{1,2})[./月](\d{1,2}).*?[〜~ー\-](\d{1,2})[./月](\d{1,2})', text)
+    if range_match:
+        m1, d1, m2, d2 = map(int, range_match.groups())
+        # 年をまたぐ判定（12月〜1月など）
+        start_year = year
+        end_year = year if m2 >= m1 else year + 1
+        return datetime(start_year, m1, d1), datetime(end_year, m2, d2)
 
-# --- データ取得・処理 ---
-@st.cache_data(ttl=1800)
+    # パターン2: 8月10日(土) のような単発形式
+    single_match = re.search(r'(\d{1,2})[./月](\d{1,2})', text)
+    if single_match:
+        m, d = map(int, single_match.groups())
+        dt = datetime(year, m, d)
+        # すでに過ぎた日付で、かつ11月や12月に1月の日付を見つけた場合は来年とみなす
+        if dt < now - timedelta(days=60):
+            dt = datetime(year + 1, m, d)
+        return dt, dt + timedelta(days=1) # 期間がない場合は1日だけ
+
+    return None, None
+
+# --- データ取得 ---
+@st.cache_data(ttl=3600)
 def get_all_events(selected_categories, extra_kw):
-    # 検索キーワードの組み立て
     search_keywords = []
     for cat in selected_categories:
         search_keywords.extend(CATEGORIES[cat])
@@ -84,16 +71,19 @@ def get_all_events(selected_categories, extra_kw):
     all_events = []
     headers = {"User-Agent": "Mozilla/5.0"}
     
-    for kw in search_keywords[:15]: # 負荷軽減のため上位15語
+    # 検索効率化のため重複削除
+    search_keywords = list(set(search_keywords))
+
+    for kw in search_keywords[:10]:
         url = f"https://collabo-cafe.com/?s={kw}"
         try:
             res = requests.get(url, headers=headers, timeout=10)
             soup = BeautifulSoup(res.text, 'html.parser')
-            for art in soup.select('article')[:6]:
+            for art in soup.select('article')[:8]:
                 title = art.select_one('.entry-title').get_text().strip()
                 link = art.find('a')['href']
                 
-                # エリア・アクセス判定
+                # アクセス判定ロジック (小山駅起点)
                 loc_label = "都内"
                 if any(x in title for x in ["宇都宮", "ベルモール"]): loc_label = "宇都宮"
                 elif any(x in title for x in ["大宮", "さいたま", "レイクタウン"]): loc_label = "大宮"
@@ -109,63 +99,74 @@ def get_all_events(selected_categories, extra_kw):
                 }
                 mins, label, color, way = access_map.get(loc_label, (90, "1時間半以内", "#f1c40f", "JR線"))
 
-                # 日付抽出
-                date_found = datetime.now()
-                match = re.search(r'(\d+)月(\d+)日', title)
-                if match:
-                    try: date_found = datetime(2024, int(match.group(1)), int(match.group(2)))
-                    except: pass
+                # 日付解析の実行
+                start_dt, end_dt = parse_event_dates(title)
+                
+                # 日付が取れなかった場合は「日付未定」としてカレンダーには出さない
+                if not start_dt:
+                    is_valid_date = False
+                    start_dt = datetime.now() # リスト表示用
+                    end_dt = datetime.now()
+                else:
+                    is_valid_date = True
 
                 all_events.append({
-                    "title": title,
-                    "start": date_found.strftime("%Y-%m-%d"),
+                    "title": f"【{kw}】{title}",
+                    "start": start_dt.strftime("%Y-%m-%d"),
+                    "end": end_dt.strftime("%Y-%m-%d"),
                     "color": color,
                     "url": link,
                     "cat": label,
                     "way": way,
-                    "genre": kw
+                    "genre": kw,
+                    "is_valid": is_valid_date
                 })
         except: pass
     return all_events
 
-# --- メイン画面 ---
+# --- UI構築 ---
+with st.sidebar:
+    st.title("📍 小山駅起点設定")
+    selected_cats = [cat for cat in CATEGORIES.keys() if st.checkbox(cat, value=True)]
+    time_limit = st.multiselect("行ける範囲", ["30分以内", "1時間以内", "1時間半以内", "2時間半以内", "それ以上"], default=["30分以内", "1時間以内", "1時間半以内"])
+    custom_kw = st.text_input("追加ワード(例: アイナナ)")
+
 st.title("🌸 推し活アクセスカレンダー")
 
-events = get_all_events(selected_cats, custom_kw)
+all_data = get_all_events(selected_cats, custom_kw)
 # フィルター適用
-filtered_events = [e for e in events if e['cat'] in time_limit]
+filtered_events = [e for e in all_data if e['cat'] in time_limit]
 
-if not filtered_events:
-    st.info("条件に合うイベントが見つかりませんでした。左のメニューからジャンルや時間を増やしてみてください。")
-else:
-    # 統計
-    c1, c2, c3 = st.columns(3)
-    c1.metric("見つかったイベント", f"{len(filtered_events)}件")
-    c2.metric("起点", "小山駅")
-    c3.metric("最速", "約25分")
+tab1, tab2 = st.tabs(["📅 カレンダー (期間表示)", "📋 イベント一覧"])
 
-    tab1, tab2 = st.tabs(["📅 カレンダー表示", "📋 リスト表示"])
-
-    with tab1:
+with tab1:
+    # 日付が判明しているものだけカレンダーに表示
+    calendar_data = [e for e in filtered_events if e['is_valid']]
+    if not calendar_data:
+        st.warning("カレンダーに表示できる日付確定イベントが見つかりませんでした。")
+    else:
         calendar_options = {
             "initialView": "dayGridMonth",
-            "headerToolbar": {"left": "prev,next today", "center": "title", "right": ""},
-            "locale": "ja"
+            "headerToolbar": {"left": "prev,next today", "center": "title", "right": "dayGridMonth,listWeek"},
+            "locale": "ja",
+            "height": "600px",
         }
-        calendar(events=filtered_events, options=calendar_options)
+        calendar(events=calendar_data, options=calendar_options)
 
-    with tab2:
-        for e in sorted(filtered_events, key=lambda x: x['start']):
+with tab2:
+    if not filtered_events:
+        st.write("イベントがありません")
+    else:
+        # 日付順に並び替え（日付不明は下に）
+        for e in sorted(filtered_events, key=lambda x: (not x['is_valid'], x['start'])):
+            date_str = f"{e['start']} 〜 {e['end']}" if e['is_valid'] else "日付情報なし(サイトを確認)"
             st.markdown(f"""
             <div class="event-card" style="border-color: {e['color']};">
-                <span class="time-badge" style="background-color: {e['color']};">{e['cat']}</span>
-                <span class="cate-badge">{e['genre']}</span>
+                <span class="date-badge">{date_str}</span> 
+                <span style="color: {e['color']}; font-weight: bold; margin-left: 10px;">⏱{e['cat']}</span>
                 <div style="margin-top:10px;">
-                    <small>📅 {e['start']} | 🚃 {e['way']}</small><br>
                     <a href="{e['url']}" target="_blank" style="text-decoration: none; color: #333; font-size: 1.1em; font-weight: bold;">{e['title']}</a>
+                    <br><small>🚃 最寄り経路目安: {e['way']} (小山駅発)</small>
                 </div>
             </div>
             """, unsafe_allow_html=True)
-
-st.divider()
-st.caption("※日付が取得できないイベントは便宜上今日の日付付近に表示されています。")
